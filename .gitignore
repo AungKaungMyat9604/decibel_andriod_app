@@ -17,3 +17,29 @@ mcp-tmp/
 node_modules/
 .kotlin/
 *.log
+.netlify/
+
+# Wash UI is vendored as normal files (not a submodule).
+# Keep only what Decibel builds against; ignore the rest of the monorepo.
+vendor/wash-ui/apps/
+vendor/wash-ui/packages/menzies-design-wash-ui/
+vendor/wash-ui/packages/wash-compose-mcp/
+vendor/wash-ui/packages/wash-ui-mcp/
+vendor/wash-ui/scripts/
+vendor/wash-ui/kotlin-js-store/
+vendor/wash-ui/gradle/
+vendor/wash-ui/.cursor/
+vendor/wash-ui/.github/
+vendor/wash-ui/.gradle/
+vendor/wash-ui/node_modules/
+vendor/wash-ui/gradlew
+vendor/wash-ui/gradlew.bat
+vendor/wash-ui/build.gradle.kts
+vendor/wash-ui/settings.gradle.kts
+vendor/wash-ui/gradle.properties
+vendor/wash-ui/package.json
+vendor/wash-ui/package-lock.json
+vendor/wash-ui/tsconfig.json
+vendor/wash-ui/netlify.toml
+vendor/wash-ui/.oxlintrc.json
+vendor/wash-ui/.gitignore
