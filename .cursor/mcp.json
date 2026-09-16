@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "wash-ui-web": {
+      "command": "npx",
+      "args": ["-y", "@menzies-mariesta-com/wash-ui-mcp@1.1.0"]
+    },
+    "wash-compose-android": {
+      "command": "npx",
+      "args": ["-y", "@menzies-mariesta-com/wash-compose-mcp@1.1.0"]
+    }
+  }
+}
