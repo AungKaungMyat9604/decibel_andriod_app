@@ -41,10 +41,10 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.mariesta.menzies.washui.icons.LucideIcons
 import com.mariesta.menzies.washui.icons.WashIcon
+import com.mariesta.menzies.washui.icons.lucide.ArrowLeft
 import com.mariesta.menzies.washui.icons.lucide.ArrowRight
 import com.mariesta.menzies.washui.icons.lucide.Circle
 import com.mariesta.menzies.washui.icons.lucide.Music4
-import com.mariesta.menzies.washui.icons.lucide.PanelLeft
 import com.mariesta.menzies.washui.icons.lucide.Repeat
 import com.mariesta.menzies.washui.icons.lucide.Shuffle
 import com.mariesta.menzies.washui.icons.lucide.Square
@@ -397,7 +397,7 @@ private fun TransportBlock(
         )
         WashIconButton(
             onClick = onPrevious,
-            imageVector = LucideIcons.PanelLeft,
+            imageVector = LucideIcons.ArrowLeft,
             contentDescription = "Previous",
             tint = colors.primary,
             iconSize = 26.dp,

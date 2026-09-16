@@ -11,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.mariesta.menzies.washui.WashProvider
+import com.mariesta.menzies.washui.theme.WashMode
 import com.mariesta.menzies.washui.theme.WashPigment
 import com.decibel.ui.DecibelAppRoot
 
@@ -27,7 +28,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             WashProvider(
                 defaultPigment = WashPigment.mineral,
-                followSystemMode = true,
+                defaultMode = WashMode.Light,
+                followSystemMode = false,
             ) {
                 DecibelAppRoot(initialUrl = sharedUrl)
             }

@@ -21,22 +21,28 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.decibel.player.PlaybackState
+import com.decibel.ui.coilImageModel
 import com.mariesta.menzies.washui.icons.LucideIcons
 import com.mariesta.menzies.washui.icons.WashIcon
+import com.mariesta.menzies.washui.icons.lucide.ArrowLeft
+import com.mariesta.menzies.washui.icons.lucide.ArrowRight
 import com.mariesta.menzies.washui.icons.lucide.Circle
 import com.mariesta.menzies.washui.icons.lucide.Music4
 import com.mariesta.menzies.washui.icons.lucide.Square
+import com.mariesta.menzies.washui.icons.lucide.X
 import com.mariesta.menzies.washui.primitives.WashIconButton
 import com.mariesta.menzies.washui.primitives.WashText
 import com.mariesta.menzies.washui.theme.WashTheme
-import com.decibel.player.PlaybackState
-import com.decibel.ui.coilImageModel
 
 @Composable
 fun MiniPlayerBar(
     playback: PlaybackState,
     onOpen: () -> Unit,
     onTogglePlay: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val current = playback.current ?: return
@@ -47,8 +53,7 @@ fun MiniPlayerBar(
         modifier = modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(colors.base_100.copy(alpha = 0.96f))
-            .clickable(onClick = onOpen),
+            .background(colors.base_100.copy(alpha = 0.96f)),
     ) {
         val progress = if (playback.durationMs > 0) {
             (playback.positionMs.toFloat() / playback.durationMs.toFloat()).coerceIn(0f, 1f)
@@ -71,53 +76,88 @@ fun MiniPlayerBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Box(
+            Row(
                 modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(colors.base_300),
-                contentAlignment = Alignment.Center,
+                    .weight(1f)
+                    .clickable(onClick = onOpen)
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                val thumbModel = remember(current.thumbnailUrl) { coilImageModel(current.thumbnailUrl) }
-                if (thumbModel != null) {
-                    AsyncImage(
-                        model = thumbModel,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.matchParentSize(),
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(colors.base_300),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val thumbModel = remember(current.thumbnailUrl) { coilImageModel(current.thumbnailUrl) }
+                    if (thumbModel != null) {
+                        AsyncImage(
+                            model = thumbModel,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.matchParentSize(),
+                        )
+                    } else {
+                        WashIcon(
+                            imageVector = LucideIcons.Music4,
+                            contentDescription = null,
+                            tint = colors.ink_muted,
+                            size = 18.dp,
+                        )
+                    }
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    WashText(
+                        text = current.title,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        maxLines = 1,
                     )
-                } else {
-                    WashIcon(
-                        imageVector = LucideIcons.Music4,
-                        contentDescription = null,
-                        tint = colors.ink_muted,
-                        size = 20.dp,
+                    WashText(
+                        text = current.uploader + if (current.isLocal) " · Offline" else " · Online",
+                        color = colors.ink_muted,
+                        fontSize = 11.sp,
+                        maxLines = 1,
                     )
                 }
             }
-            Column(modifier = Modifier.weight(1f)) {
-                WashText(
-                    text = current.title,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                )
-                WashText(
-                    text = current.uploader + if (current.isLocal) " · Offline" else " · Online",
-                    color = colors.ink_muted,
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                )
-            }
+            WashIconButton(
+                onClick = onPrevious,
+                imageVector = LucideIcons.ArrowLeft,
+                contentDescription = "Previous",
+                tint = colors.primary,
+                iconSize = 18.dp,
+                buttonSize = 36.dp,
+            )
             WashIconButton(
                 onClick = onTogglePlay,
                 imageVector = if (playback.isPlaying) LucideIcons.Square else LucideIcons.Circle,
                 contentDescription = if (playback.isPlaying) "Pause" else "Play",
                 tint = colors.primary,
+                iconSize = 18.dp,
+                buttonSize = 36.dp,
+            )
+            WashIconButton(
+                onClick = onNext,
+                imageVector = LucideIcons.ArrowRight,
+                contentDescription = "Next",
+                tint = colors.primary,
+                iconSize = 18.dp,
+                buttonSize = 36.dp,
+            )
+            WashIconButton(
+                onClick = onClose,
+                imageVector = LucideIcons.X,
+                contentDescription = "Close",
+                tint = colors.ink_muted,
+                iconSize = 16.dp,
+                buttonSize = 36.dp,
             )
         }
     }

@@ -74,10 +74,48 @@ private fun titleLetter(title: String): Char {
     return if (c in 'A'..'Z') c else '#'
 }
 
+/** Lowercase letters/digits only — so "jme" matches "J.M.E", "j_m_e", "JME", etc. */
+private fun String.normalizeForSearch(): String =
+    lowercase().filter { it.isLetterOrDigit() }
+
+private fun SavedVideo.matchesQuery(rawQuery: String): Boolean {
+    val q = rawQuery.trim()
+    if (q.isEmpty()) return true
+
+    val fields = listOf(
+        title,
+        uploader,
+        fileName,
+        format,
+        quality,
+        webpageUrl,
+        id,
+    )
+
+    // Exact substring in any field (any case).
+    if (fields.any { it.contains(q, ignoreCase = true) }) return true
+
+    // Alphanumeric-only: ignores spaces, underscores, dots, dashes, etc.
+    val normQ = q.normalizeForSearch()
+    if (normQ.isNotEmpty() && fields.any { it.normalizeForSearch().contains(normQ) }) {
+        return true
+    }
+
+    // Multi-word: every token must appear somewhere (any style).
+    val tokens = q.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
+    if (tokens.size <= 1) return false
+    return tokens.all { token ->
+        fields.any { it.contains(token, ignoreCase = true) } ||
+            token.normalizeForSearch().let { n ->
+                n.isNotEmpty() && fields.any { it.normalizeForSearch().contains(n) }
+            }
+    }
+}
+
 @Composable
 fun LibraryScreen(
     videos: List<SavedVideo>,
-    onPlay: (SavedVideo) -> Unit,
+    onPlay: (item: SavedVideo, queue: List<SavedVideo>) -> Unit,
     onDelete: (String) -> Unit,
     onToggleFavourite: (String) -> Unit,
 ) {
@@ -97,17 +135,19 @@ fun LibraryScreen(
         val base = if (q.isEmpty()) {
             scoped
         } else {
-            scoped.filter {
-                it.title.contains(q, ignoreCase = true) ||
-                    it.uploader.contains(q, ignoreCase = true)
-            }
+            scoped.filter { it.matchesQuery(q) }
         }
-        base.sortedBy { it.title.lowercase() }
+        // Same order as on-screen sections: # first, then A–Z; title within each.
+        base
+            .groupBy { titleLetter(it.title) }
+            .toSortedMap(compareBy { if (it == '#') '@' else it })
+            .flatMap { (_, items) -> items.sortedBy { it.title.lowercase() } }
     }
 
     val favouriteCount = remember(videos) { videos.count { it.isFavourite } }
 
     val sections = remember(filtered) {
+        // Preserve filtered encounter order within each letter (already title-sorted).
         filtered.groupBy { titleLetter(it.title) }
             .toSortedMap(compareBy { if (it == '#') '@' else it })
     }
@@ -169,7 +209,7 @@ fun LibraryScreen(
             value = filter,
             onValueChange = { filter = it },
             label = "Filter",
-            placeholder = "Search titles…",
+            placeholder = "Search title, file, uploader…",
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -210,7 +250,7 @@ fun LibraryScreen(
                             scopeFilter == LibraryScope.Favourites ->
                                 "Swipe a row right to add it to Favourites."
                             filter.isNotBlank() ->
-                                "No titles match “$filter”."
+                                "No items match “$filter”."
                             else ->
                                 "Download from Browse, or scan a folder in Settings."
                         },
@@ -230,7 +270,7 @@ fun LibraryScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight(),
-                    contentPadding = PaddingValues(end = 4.dp, bottom = 16.dp),
+                    contentPadding = PaddingValues(end = 2.dp, bottom = 16.dp),
                 ) {
                     sections.forEach { (letter, items) ->
                         item(key = "header_$letter") {
@@ -245,7 +285,7 @@ fun LibraryScreen(
                         items(items, key = { it.id }) { video ->
                             SwipeLibraryRow(
                                 video = video,
-                                onPlay = { onPlay(video) },
+                                onPlay = { onPlay(video, filtered) },
                                 onFavourite = { onToggleFavourite(video.id) },
                                 onRequestDelete = { pendingDelete = video },
                             )
@@ -260,7 +300,7 @@ fun LibraryScreen(
                     onSelect = { scrollToLetter(it) },
                     modifier = Modifier
                         .fillMaxHeight()
-                        .width(22.dp),
+                        .width(16.dp),
                 )
             }
         }

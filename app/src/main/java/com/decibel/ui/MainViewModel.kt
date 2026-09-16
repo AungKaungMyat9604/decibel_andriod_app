@@ -290,15 +290,22 @@ class MainViewModel(
         _usingAppFolder.value = libraryStore.storageSettings().isUsingAppFolder()
     }
 
-    fun playLocal(item: SavedVideo) {
-        val queue = library.value.map { PlayableItem.fromLocal(it) }
-        playback.play(PlayableItem.fromLocal(item), queue)
+    fun playLocal(item: SavedVideo, queue: List<SavedVideo> = library.value) {
+        val ordered = queue.ifEmpty { listOf(item) }
+        // Keep visible list order; ensure the tapped item is present.
+        val playQueue = if (ordered.any { it.id == item.id }) {
+            ordered
+        } else {
+            listOf(item) + ordered
+        }.map { PlayableItem.fromLocal(it) }
+        playback.play(PlayableItem.fromLocal(item), playQueue)
     }
 
     fun togglePlayPause() = playback.togglePlayPause()
     fun seekTo(ms: Long) = playback.seekTo(ms)
     fun playNext() = playback.playNext()
     fun playPrevious() = playback.playPrevious()
+    fun stopPlayback() = playback.stopAndClear()
     fun toggleShuffle() = playback.toggleShuffle()
     fun cycleRepeat() = playback.cycleRepeatMode()
 

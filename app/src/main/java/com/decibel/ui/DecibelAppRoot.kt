@@ -34,18 +34,15 @@ import com.mariesta.menzies.washui.components.WashBackground
 import com.mariesta.menzies.washui.icons.LucideIcons
 import com.mariesta.menzies.washui.icons.WashIcon
 import com.mariesta.menzies.washui.icons.lucide.Music4
-import com.mariesta.menzies.washui.icons.lucide.Sun
-import com.mariesta.menzies.washui.icons.lucide.SunMoon
 import com.mariesta.menzies.washui.primitives.WashButton
 import com.mariesta.menzies.washui.primitives.WashButtonVariant
 import com.mariesta.menzies.washui.primitives.WashDialog
 import com.mariesta.menzies.washui.primitives.WashDialogTone
-import com.mariesta.menzies.washui.primitives.WashIconButton
 import com.mariesta.menzies.washui.primitives.WashScaffold
 import com.mariesta.menzies.washui.primitives.WashTopBar
-import com.mariesta.menzies.washui.theme.WashMode
+import com.mariesta.menzies.washui.primitives.WashToastProvider
+import com.mariesta.menzies.washui.primitives.rememberWashToastState
 import com.mariesta.menzies.washui.theme.WashTheme
-import com.mariesta.menzies.washui.useWash
 import com.decibel.DecibelApp
 import com.decibel.data.DownloadProgressHub
 import com.decibel.ui.components.BottomDock
@@ -133,7 +130,6 @@ fun DecibelAppRoot(initialUrl: String? = null) {
         DockTab.Notifications -> "Alerts"
         DockTab.Settings -> "Settings"
     }
-    val wash = useWash()
     DecibelSystemBars()
 
     fun go(tab: DockTab) {
@@ -177,7 +173,11 @@ fun DecibelAppRoot(initialUrl: String? = null) {
         },
     )
 
-    WashBackground(modifier = Modifier.fillMaxSize()) {
+    WashToastProvider(alignment = Alignment.TopCenter) {
+        val toast = rememberWashToastState()
+        DownloadJobToasts(jobs = jobs, toast = toast)
+
+        WashBackground(modifier = Modifier.fillMaxSize()) {
         WashScaffold(
             topBar = {
                 if (!immersiveNowPlaying) {
@@ -190,26 +190,6 @@ fun DecibelAppRoot(initialUrl: String? = null) {
                                 contentDescription = "Decibel",
                                 tint = WashTheme.colors.primary,
                                 size = 22.dp,
-                            )
-                        },
-                        actions = {
-                            WashIconButton(
-                                onClick = {
-                                    wash.setMode(
-                                        if (wash.mode == WashMode.Dark) WashMode.Light else WashMode.Dark,
-                                    )
-                                },
-                                imageVector = if (wash.mode == WashMode.Dark) {
-                                    LucideIcons.Sun
-                                } else {
-                                    LucideIcons.SunMoon
-                                },
-                                contentDescription = if (wash.mode == WashMode.Dark) {
-                                    "Switch to light mode"
-                                } else {
-                                    "Switch to dark mode"
-                                },
-                                tint = WashTheme.colors.ink_muted,
                             )
                         },
                     )
@@ -226,10 +206,15 @@ fun DecibelAppRoot(initialUrl: String? = null) {
                             .weight(1f)
                             .fillMaxSize()
                             .then(
-                                if (immersiveNowPlaying) {
-                                    Modifier
-                                } else {
-                                    Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                                when {
+                                    immersiveNowPlaying -> Modifier
+                                    route == Routes.Library -> Modifier.padding(
+                                        start = 16.dp,
+                                        top = 12.dp,
+                                        end = 2.dp,
+                                        bottom = 12.dp,
+                                    )
+                                    else -> Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
                                 },
                             ),
                     ) {
@@ -248,8 +233,8 @@ fun DecibelAppRoot(initialUrl: String? = null) {
                             val videos by vm.library.collectAsStateWithLifecycle()
                             LibraryScreen(
                                 videos = videos,
-                                onPlay = { item ->
-                                    vm.playLocal(item)
+                                onPlay = { item, queue ->
+                                    vm.playLocal(item, queue)
                                     go(DockTab.NowPlaying)
                                 },
                                 onDelete = vm::deleteVideo,
@@ -294,6 +279,9 @@ fun DecibelAppRoot(initialUrl: String? = null) {
                             playback = playback,
                             onOpen = { go(DockTab.NowPlaying) },
                             onTogglePlay = vm::togglePlayPause,
+                            onPrevious = vm::playPrevious,
+                            onNext = vm::playNext,
+                            onClose = vm::stopPlayback,
                         )
                     }
 
@@ -330,6 +318,7 @@ fun DecibelAppRoot(initialUrl: String? = null) {
                     }
                 }
             }
+        }
         }
     }
 }

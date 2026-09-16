@@ -140,6 +140,21 @@ class PlaybackController(context: Context) {
         advance(-1, fromUser = true)
     }
 
+    /** Stop playback and hide the mini player. */
+    fun stopAndClear() {
+        resolveJob?.cancel()
+        stopPositionUpdates()
+        mediaController?.pause()
+        player.stop()
+        player.clearMediaItems()
+        sourceQueue = emptyList()
+        playOrder = emptyList()
+        _state.value = PlaybackState(
+            shuffle = prefs.shuffleEnabled,
+            repeatMode = prefs.repeatMode,
+        )
+    }
+
     fun toggleShuffle() {
         val next = !_state.value.shuffle
         prefs.shuffleEnabled = next
