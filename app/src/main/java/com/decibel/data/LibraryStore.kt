@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -22,6 +24,7 @@ class LibraryStore(
     private val gson = Gson()
     private val metaFile = File(context.filesDir, "library.json")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val writeMutex = Mutex()
     private val _videos = MutableStateFlow(emptyList<SavedVideo>())
     val videos: StateFlow<List<SavedVideo>> = _videos.asStateFlow()
 
@@ -30,11 +33,13 @@ class LibraryStore(
             thumbs.pathIfExists(video.id)?.let { video.copy(thumbnailUrl = it) } ?: video
         }
         _videos.value = loaded
-        // Backfill missing local thumbs off the main thread (frame grab / remote cache).
         scope.launch {
-            val updated = loaded.map { ensureLocalThumb(it) }
-            if (updated != loaded) {
-                persist(updated)
+            writeMutex.withLock {
+                val current = _videos.value
+                val withThumbs = current.map { ensureLocalThumb(it) }
+                if (withThumbs != current) {
+                    persist(withThumbs)
+                }
             }
         }
     }
@@ -44,6 +49,24 @@ class LibraryStore(
     fun thumbnailStore(): ThumbnailStore = thumbs
 
     fun displayFolder(): String = storage.displayPath()
+
+    fun displayFolder(type: MediaType): String = storage.displayPath(type)
+
+    /**
+     * If a library entry still points at legacy flat `media/file` after the
+     * Video/Music split, retarget to the new location when the file exists there.
+     */
+    private fun relocateIfMoved(video: SavedVideo): SavedVideo {
+        if (storage.exists(video.filePath)) return video
+        if (video.filePath.startsWith("content:")) return video
+        val name = video.fileName.ifBlank { File(video.filePath).name }
+        val candidate = File(storage.defaultDir(video.mediaType), name)
+        return if (candidate.exists()) {
+            video.copy(filePath = candidate.absolutePath, fileName = name)
+        } else {
+            video
+        }
+    }
 
     fun getById(id: String): SavedVideo? = _videos.value.firstOrNull { it.id == id }
 
@@ -65,64 +88,109 @@ class LibraryStore(
     }
 
     suspend fun upsert(video: SavedVideo) = withContext(Dispatchers.IO) {
-        val existing = _videos.value.firstOrNull { it.id == video.id }
-        val merged = video.copy(isFavourite = video.isFavourite || (existing?.isFavourite == true))
-        val withThumb = ensureLocalThumb(merged)
-        val next = listOf(withThumb) + _videos.value.filterNot { it.id == withThumb.id }
-        persist(next)
+        writeMutex.withLock {
+            val existing = _videos.value.firstOrNull { it.id == video.id }
+            val merged = video.copy(isFavourite = video.isFavourite || (existing?.isFavourite == true))
+            val withThumb = ensureLocalThumb(merged)
+            val next = listOf(withThumb) + _videos.value.filterNot { it.id == withThumb.id }
+            persist(next)
+        }
     }
 
     suspend fun setFavourite(id: String, favourite: Boolean) = withContext(Dispatchers.IO) {
-        val next = _videos.value.map {
-            if (it.id == id) it.copy(isFavourite = favourite) else it
+        writeMutex.withLock {
+            val next = _videos.value.map {
+                if (it.id == id) it.copy(isFavourite = favourite) else it
+            }
+            persist(next)
         }
-        persist(next)
     }
 
     suspend fun toggleFavourite(id: String) = withContext(Dispatchers.IO) {
-        val next = _videos.value.map {
-            if (it.id == id) it.copy(isFavourite = !it.isFavourite) else it
+        writeMutex.withLock {
+            val next = _videos.value.map {
+                if (it.id == id) it.copy(isFavourite = !it.isFavourite) else it
+            }
+            persist(next)
         }
-        persist(next)
     }
 
-    suspend fun delete(id: String) = withContext(Dispatchers.IO) {
-        val existing = _videos.value.firstOrNull { it.id == id }
-        if (existing != null) {
-            storage.deleteRef(existing.filePath)
-            thumbs.delete(id)
+    suspend fun delete(id: String) = deleteMany(listOf(id))
+
+    /**
+     * Atomically remove many entries. Concurrent single deletes used to race on
+     * [persist] and resurrect metadata for files that were already deleted.
+     */
+    suspend fun deleteMany(ids: Collection<String>) = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext
+        val idSet = ids.toSet()
+        writeMutex.withLock {
+            val current = _videos.value
+            val removing = current.filter { it.id in idSet }
+            removing.forEach { existing ->
+                storage.deleteRef(existing.filePath)
+                thumbs.delete(existing.id)
+            }
+            persist(current.filterNot { it.id in idSet })
         }
-        persist(_videos.value.filterNot { it.id == id })
+    }
+
+    /**
+     * Reorder a visible subset (All or Favourites list) and splice that relative
+     * order back into the persisted full library list.
+     */
+    suspend fun setOrderForSubset(orderedVisibleIds: List<String>) = withContext(Dispatchers.IO) {
+        if (orderedVisibleIds.isEmpty()) return@withContext
+        writeMutex.withLock {
+            val full = _videos.value.toMutableList()
+            val idSet = orderedVisibleIds.toSet()
+            if (idSet.size != orderedVisibleIds.size) return@withLock
+            val slots = full.withIndex()
+                .filter { it.value.id in idSet }
+                .map { it.index }
+            if (slots.size != orderedVisibleIds.size) return@withLock
+            val byId = full.associateBy { it.id }
+            if (!orderedVisibleIds.all { it in byId }) return@withLock
+            slots.zip(orderedVisibleIds).forEach { (slot, id) ->
+                full[slot] = byId.getValue(id)
+            }
+            persist(full)
+        }
     }
 
     suspend fun refreshFromFolder() = withContext(Dispatchers.IO) {
-        val existing = load().associateBy { it.filePath }.toMutableMap()
-        for (file in storage.listMediaFiles()) {
-            if (existing.containsKey(file.ref)) continue
-            val id = "file_${file.name.hashCode()}_${file.sizeBytes}"
-            if (existing.values.any { it.id == id }) continue
-            val ext = file.name.substringAfterLast('.', "mp4").lowercase()
-            existing[file.ref] = SavedVideo(
-                id = id,
-                title = file.name.substringBeforeLast('.').ifBlank { file.name },
-                uploader = "Local file",
-                durationSeconds = 0L,
-                thumbnailUrl = null,
-                webpageUrl = "",
-                quality = "local",
-                fileName = file.name,
-                filePath = file.ref,
-                fileSizeBytes = file.sizeBytes,
-                downloadedAtEpochMs = file.lastModified,
-                mediaType = if (ext in setOf("mp3", "m4a", "opus")) MediaType.AUDIO else MediaType.VIDEO,
-                format = ext,
-            )
+        writeMutex.withLock {
+            // Preserve the user's custom list order; only append newly discovered files.
+            val current = _videos.value.ifEmpty { load() }
+            val knownPaths = current.map { it.filePath }.toHashSet()
+            val discovered = mutableListOf<SavedVideo>()
+            for (file in storage.listMediaFiles()) {
+                if (file.ref in knownPaths) continue
+                val id = "file_${file.name.hashCode()}_${file.sizeBytes}"
+                if (current.any { it.id == id } || discovered.any { it.id == id }) continue
+                val ext = file.name.substringAfterLast('.', "mp4").lowercase()
+                discovered += SavedVideo(
+                    id = id,
+                    title = file.name.substringBeforeLast('.').ifBlank { file.name },
+                    uploader = "Local file",
+                    durationSeconds = 0L,
+                    thumbnailUrl = null,
+                    webpageUrl = "",
+                    quality = "local",
+                    fileName = file.name,
+                    filePath = file.ref,
+                    fileSizeBytes = file.sizeBytes,
+                    downloadedAtEpochMs = file.lastModified,
+                    mediaType = file.mediaType,
+                    format = ext,
+                )
+            }
+            val keptExisting = current
+                .filter { storage.exists(it.filePath) }
+                .map { ensureLocalThumb(it) }
+            val appended = discovered.map { ensureLocalThumb(it) }
+            persist(keptExisting + appended)
         }
-        val kept = existing.values
-            .filter { storage.exists(it.filePath) }
-            .map { ensureLocalThumb(it) }
-            .sortedByDescending { it.downloadedAtEpochMs }
-        persist(kept)
     }
 
     /**
@@ -158,9 +226,16 @@ class LibraryStore(
         if (!metaFile.exists()) return emptyList()
         return runCatching {
             val root = JsonParser.parseString(metaFile.readText()).asJsonArray
-            root.mapNotNull { element ->
-                migrateItem(element.asJsonObject)
-            }.filter { storage.exists(it.filePath) }
+            val migrated = root.mapNotNull { migrateItem(it.asJsonObject) }
+            val relocated = migrated.map { relocateIfMoved(it) }
+            val kept = relocated.filter { storage.exists(it.filePath) }
+            val pathsChanged = migrated.zip(relocated).any { (before, after) ->
+                before.filePath != after.filePath
+            }
+            if (pathsChanged) {
+                metaFile.writeText(gson.toJson(kept))
+            }
+            kept
         }.getOrDefault(emptyList())
     }
 

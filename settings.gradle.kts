@@ -56,7 +56,3 @@ dependencyResolutionManagement {
 rootProject.name = "Decibel"
 
 include(":app")
-include(":menzies-design-wash-compose")
-
-project(":menzies-design-wash-compose").projectDir =
-    file("vendor/wash-ui/packages/menzies-design-wash-compose")

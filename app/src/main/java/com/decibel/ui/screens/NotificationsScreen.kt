@@ -10,39 +10,37 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.decibel.data.DownloadJob
 import com.decibel.data.DownloadJobState
-import com.mariesta.menzies.washui.icons.LucideIcons
-import com.mariesta.menzies.washui.icons.WashIcon
-import com.mariesta.menzies.washui.icons.lucide.Bell
-import com.mariesta.menzies.washui.icons.lucide.X
-import com.mariesta.menzies.washui.primitives.WashButton
-import com.mariesta.menzies.washui.primitives.WashButtonVariant
-import com.mariesta.menzies.washui.primitives.WashIconButton
-import com.mariesta.menzies.washui.primitives.WashPanel
-import com.mariesta.menzies.washui.primitives.WashText
-import com.mariesta.menzies.washui.theme.WashTheme
 
 @Composable
 fun NotificationsScreen(
     jobs: List<DownloadJob>,
     onMarkSeen: () -> Unit,
-    onClearFinished: () -> Unit,
     onDismiss: (String) -> Unit,
 ) {
-    val colors = WashTheme.colors
+    val colors = MaterialTheme.colorScheme
     LaunchedEffect(jobs.map { it.jobId to it.state }) {
         onMarkSeen()
     }
@@ -51,87 +49,49 @@ fun NotificationsScreen(
     val finished = jobs.filter { it.isTerminal }.asReversed()
     val ordered = active + finished
 
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+    if (ordered.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                WashText(
-                    text = "Downloads & alerts",
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Notifications,
+                    contentDescription = null,
+                    tint = colors.onSurfaceVariant,
+                    modifier = Modifier.padding(4.dp),
+                )
+                Text(
+                    text = "No notifications",
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.sp,
+                    fontSize = 17.sp,
+                    color = colors.onSurface,
                 )
-                WashText(
-                    text = when {
-                        active.isNotEmpty() -> "${active.size} in progress"
-                        finished.isNotEmpty() -> "${finished.size} recent"
-                        else -> "Nothing yet"
-                    },
-                    color = colors.ink_muted,
-                    fontSize = 12.sp,
-                )
-            }
-            if (finished.isNotEmpty()) {
-                WashButton(
-                    onClick = onClearFinished,
-                    text = "Clear done",
-                    variant = WashButtonVariant.Ghost,
+                Text(
+                    text = "Download progress and results will show up here.",
+                    color = colors.onSurfaceVariant,
+                    fontSize = 13.sp,
                 )
             }
         }
-
-        if (ordered.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    WashIcon(
-                        imageVector = LucideIcons.Bell,
-                        contentDescription = null,
-                        tint = colors.ink_muted,
-                        size = 36.dp,
-                    )
-                    WashText(
-                        text = "No notifications",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 17.sp,
-                    )
-                    WashText(
-                        text = "Download progress and results will show up here.",
-                        color = colors.ink_muted,
-                        fontSize = 13.sp,
-                    )
-                }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentPadding = PaddingValues(bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(ordered, key = { it.jobId }) { job ->
-                    NotificationJobCard(
-                        job = job,
-                        onDismiss = if (job.isTerminal) {
-                            { onDismiss(job.jobId) }
-                        } else {
-                            null
-                        },
-                    )
-                }
+    } else {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(ordered, key = { it.jobId }) { job ->
+                NotificationJobCard(
+                    job = job,
+                    onDismiss = if (job.isTerminal) {
+                        { onDismiss(job.jobId) }
+                    } else {
+                        null
+                    },
+                )
             }
         }
     }
@@ -142,9 +102,15 @@ private fun NotificationJobCard(
     job: DownloadJob,
     onDismiss: (() -> Unit)?,
 ) {
-    val colors = WashTheme.colors
-    WashPanel(modifier = Modifier.fillMaxWidth()) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val colors = MaterialTheme.colorScheme
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = colors.surface),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -154,41 +120,43 @@ private fun NotificationJobCard(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    WashText(
+                    Text(
                         text = statusLabel(job),
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 13.sp,
                         color = when (job.state) {
-                            DownloadJobState.Success -> colors.success
+                            DownloadJobState.Success -> colors.primary
                             DownloadJobState.Failed -> colors.error
                             DownloadJobState.Running -> colors.primary
-                            DownloadJobState.Queued -> colors.ink_muted
+                            DownloadJobState.Queued -> colors.onSurfaceVariant
                         },
                     )
-                    WashText(
+                    Text(
                         text = job.title,
                         fontWeight = FontWeight.Medium,
                         fontSize = 14.sp,
                         maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        color = colors.onSurface,
                     )
                     if (!job.message.isNullOrBlank() && job.state == DownloadJobState.Failed) {
-                        WashText(
+                        Text(
                             text = job.message,
                             color = colors.error,
                             fontSize = 12.sp,
                             maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
                 if (onDismiss != null) {
-                    WashIconButton(
-                        onClick = onDismiss,
-                        imageVector = LucideIcons.X,
-                        contentDescription = "Dismiss",
-                        tint = colors.ink_muted,
-                        iconSize = 16.dp,
-                        buttonSize = 32.dp,
-                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Dismiss",
+                            tint = colors.onSurfaceVariant,
+                        )
+                    }
                 }
             }
 
@@ -198,14 +166,14 @@ private fun NotificationJobCard(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    WashText(
+                    Text(
                         text = if (job.state == DownloadJobState.Queued) "Waiting…" else "Downloading",
-                        color = colors.ink_muted,
+                        color = colors.onSurfaceVariant,
                         fontSize = 11.sp,
                     )
-                    WashText(
+                    Text(
                         text = "${job.percent.coerceIn(0, 100)}%",
-                        color = colors.ink_muted,
+                        color = colors.onSurfaceVariant,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
                     )
@@ -217,14 +185,14 @@ private fun NotificationJobCard(
 
 @Composable
 private fun ProgressTrack(percent: Int) {
-    val colors = WashTheme.colors
+    val colors = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(999.dp)
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(8.dp)
             .clip(shape)
-            .background(colors.base_300),
+            .background(colors.surfaceVariant),
     ) {
         Box(
             modifier = Modifier

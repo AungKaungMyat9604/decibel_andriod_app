@@ -12,13 +12,15 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import com.decibel.DecibelApp
 import com.decibel.MainActivity
 import com.decibel.R
-import com.decibel.DecibelApp
 import com.decibel.data.DownloadJob
 import com.decibel.data.DownloadJobState
 import com.decibel.data.DownloadProgressHub
-import com.decibel.youtube.VideoFormatOption
+import com.decibel.data.SavedVideo
+import com.decibel.youtube.DownloadKind
+import com.decibel.youtube.MediaDownloadOption
 import com.decibel.youtube.VideoLookup
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -66,25 +68,12 @@ class DownloadForegroundService : Service() {
             return START_NOT_STICKY
         }
 
-        val webpageUrl = intent?.getStringExtra(EXTRA_URL) ?: return START_NOT_STICKY
-        val formatUrl = intent.getStringExtra(EXTRA_FORMAT_URL) ?: return START_NOT_STICKY
-        val title = intent.getStringExtra(EXTRA_TITLE) ?: "Video"
-        val uploader = intent.getStringExtra(EXTRA_UPLOADER) ?: "Unknown"
-        val videoId = intent.getStringExtra(EXTRA_VIDEO_ID) ?: webpageUrl.hashCode().toString()
-        val duration = intent.getLongExtra(EXTRA_DURATION, 0L)
-        val thumb = intent.getStringExtra(EXTRA_THUMB)
-        val quality = intent.getStringExtra(EXTRA_QUALITY) ?: "unknown"
-        val format = intent.getStringExtra(EXTRA_FORMAT) ?: "mp4"
-        val size = intent.getLongExtra(EXTRA_SIZE, -1L).takeIf { it > 0 }
-        val overwrite = intent.getBooleanExtra(EXTRA_OVERWRITE, false)
-        val jobId = intent.getStringExtra(EXTRA_JOB_ID) ?: DownloadProgressHub.newJobId()
-        val entryId = "${videoId}_video"
-
+        val mode = intent?.getStringExtra(EXTRA_MODE) ?: MODE_DOWNLOAD
         if (!foregroundStarted.getAndSet(true)) {
             ServiceCompat.startForeground(
                 this,
                 NOTIFICATION_ID,
-                buildNotification("Starting download…", 0, indeterminate = true),
+                buildNotification("Starting…", 0, indeterminate = true),
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
                 } else {
@@ -93,24 +82,69 @@ class DownloadForegroundService : Service() {
             )
         }
 
+        val jobId = intent?.getStringExtra(EXTRA_JOB_ID) ?: DownloadProgressHub.newJobId()
         if (workers.containsKey(jobId)) {
             return START_STICKY
         }
 
-        DownloadProgressHub.enqueue(
-            DownloadJob(
-                jobId = jobId,
-                entryId = entryId,
-                title = title,
-                state = DownloadJobState.Queued,
-                totalBytes = size,
-            ),
-        )
-
         val app = application as DecibelApp
-        val worker = scope.launch(Dispatchers.IO) {
-            semaphore.withPermit {
-                val lookup = VideoLookup(
+
+        when (mode) {
+            MODE_CONVERT -> {
+                val sourceId = intent?.getStringExtra(EXTRA_SOURCE_ID) ?: return START_NOT_STICKY
+                val source = app.libraryStore.getById(sourceId) ?: return START_NOT_STICKY
+                DownloadProgressHub.enqueue(
+                    DownloadJob(
+                        jobId = jobId,
+                        entryId = sourceId,
+                        title = source.title,
+                        state = DownloadJobState.Queued,
+                    ),
+                )
+                val worker = scope.launch(Dispatchers.IO) {
+                    semaphore.withPermit {
+                        runCatching {
+                            app.downloadRepository.convertToMp3(source, jobId, overwrite = true)
+                        }
+                    }
+                    workers.remove(jobId)
+                }
+                workers[jobId] = worker
+            }
+            else -> {
+                val webpageUrl = intent?.getStringExtra(EXTRA_URL) ?: return START_NOT_STICKY
+                val optionId = intent.getStringExtra(EXTRA_OPTION_ID) ?: return START_NOT_STICKY
+                val title = intent.getStringExtra(EXTRA_TITLE) ?: "Video"
+                val uploader = intent.getStringExtra(EXTRA_UPLOADER) ?: "Unknown"
+                val videoId = intent.getStringExtra(EXTRA_VIDEO_ID) ?: webpageUrl.hashCode().toString()
+                val duration = intent.getLongExtra(EXTRA_DURATION, 0L)
+                val thumb = intent.getStringExtra(EXTRA_THUMB)
+                val kindName = intent.getStringExtra(EXTRA_KIND) ?: DownloadKind.PROGRESSIVE.name
+                val kind = runCatching { DownloadKind.valueOf(kindName) }.getOrDefault(DownloadKind.PROGRESSIVE)
+                val label = intent.getStringExtra(EXTRA_LABEL) ?: "Download"
+                val videoUrl = intent.getStringExtra(EXTRA_VIDEO_URL)
+                val audioUrl = intent.getStringExtra(EXTRA_AUDIO_URL)
+                val videoExt = intent.getStringExtra(EXTRA_VIDEO_EXT) ?: "mp4"
+                val audioExt = intent.getStringExtra(EXTRA_AUDIO_EXT) ?: "m4a"
+                val height = intent.getIntExtra(EXTRA_HEIGHT, 0)
+                val size = intent.getLongExtra(EXTRA_SIZE, -1L).takeIf { it > 0 }
+                val overwrite = intent.getBooleanExtra(EXTRA_OVERWRITE, false)
+                val entryId = when (kind) {
+                    DownloadKind.AUDIO_MP3 -> "${videoId}_audio"
+                    else -> "${videoId}_video"
+                }
+
+                DownloadProgressHub.enqueue(
+                    DownloadJob(
+                        jobId = jobId,
+                        entryId = entryId,
+                        title = title,
+                        state = DownloadJobState.Queued,
+                        totalBytes = size,
+                    ),
+                )
+
+                val seedLookup = VideoLookup(
                     id = videoId,
                     title = title,
                     uploader = uploader,
@@ -118,22 +152,37 @@ class DownloadForegroundService : Service() {
                     thumbnailUrl = thumb,
                     webpageUrl = webpageUrl,
                     videoFormats = emptyList(),
-                    playbackUrl = formatUrl,
+                    downloadOptions = emptyList(),
+                    playbackUrl = videoUrl ?: audioUrl.orEmpty(),
                 )
-                val option = VideoFormatOption(
-                    quality = quality,
-                    resolution = quality,
-                    format = format,
-                    url = formatUrl,
+                val seedOption = MediaDownloadOption(
+                    id = optionId,
+                    kind = kind,
+                    label = label,
+                    videoUrl = videoUrl,
+                    audioUrl = audioUrl,
+                    videoExt = videoExt,
+                    audioExt = audioExt,
+                    height = height,
                     approxSizeBytes = size,
                 )
-                runCatching {
-                    app.downloadRepository.downloadVideo(lookup, option, jobId, overwrite)
+
+                val worker = scope.launch(Dispatchers.IO) {
+                    semaphore.withPermit {
+                        runCatching {
+                            app.downloadRepository.downloadOption(
+                                seedLookup,
+                                seedOption,
+                                jobId,
+                                overwrite,
+                            )
+                        }
+                    }
+                    workers.remove(jobId)
                 }
+                workers[jobId] = worker
             }
-            workers.remove(jobId)
         }
-        workers[jobId] = worker
         return START_STICKY
     }
 
@@ -153,18 +202,19 @@ class DownloadForegroundService : Service() {
             running.isNotEmpty() -> {
                 val top = running.maxByOrNull { it.percent } ?: running.first()
                 val extra = if (active.size > 1) " (+${active.size - 1} more)" else ""
+                val phase = top.message?.let { " — $it" }.orEmpty()
                 buildNotification(
-                    "Downloading ${top.title} — ${top.percent}%$extra",
+                    "${top.title}$phase — ${top.percent}%$extra",
                     top.percent,
                     indeterminate = top.percent <= 0,
                 )
             }
             active.isNotEmpty() -> buildNotification(
-                "Queued ${active.size} download(s)…",
+                "Queued ${active.size} job(s)…",
                 0,
                 indeterminate = true,
             )
-            jobs.any { it.state == DownloadJobState.Failed && it.state == jobs.lastOrNull()?.state } -> {
+            jobs.any { it.state == DownloadJobState.Failed } -> {
                 val failed = jobs.lastOrNull { it.state == DownloadJobState.Failed }
                 buildNotification(
                     failed?.message ?: "Download failed",
@@ -175,7 +225,7 @@ class DownloadForegroundService : Service() {
             jobs.any { it.state == DownloadJobState.Success } -> {
                 val ok = jobs.lastOrNull { it.state == DownloadJobState.Success }
                 buildNotification(
-                    "Downloaded ${ok?.title ?: "file"}",
+                    "Saved ${ok?.title ?: "file"}",
                     100,
                     ongoing = false,
                 )
@@ -198,7 +248,7 @@ class DownloadForegroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Decibel download")
+            .setContentTitle("Decibel")
             .setContentText(content)
             .setSmallIcon(R.drawable.ic_stat_download)
             .setContentIntent(open)
@@ -220,7 +270,7 @@ class DownloadForegroundService : Service() {
                 "Downloads",
                 NotificationManager.IMPORTANCE_DEFAULT,
             ).apply {
-                description = "Background video downloads"
+                description = "Background downloads and conversions"
                 setSound(null, null)
             },
         )
@@ -229,42 +279,76 @@ class DownloadForegroundService : Service() {
     companion object {
         const val CHANNEL_ID = "decibel_downloads"
         const val NOTIFICATION_ID = 42
-        const val MAX_CONCURRENT = 3
+        const val MAX_CONCURRENT = 2
         const val ACTION_CANCEL = "com.decibel.CANCEL_DOWNLOAD"
+        const val MODE_DOWNLOAD = "download"
+        const val MODE_CONVERT = "convert"
+
+        const val EXTRA_MODE = "mode"
         const val EXTRA_URL = "url"
-        const val EXTRA_FORMAT_URL = "format_url"
+        const val EXTRA_OPTION_ID = "option_id"
         const val EXTRA_TITLE = "title"
         const val EXTRA_UPLOADER = "uploader"
         const val EXTRA_VIDEO_ID = "video_id"
         const val EXTRA_DURATION = "duration"
         const val EXTRA_THUMB = "thumb"
-        const val EXTRA_QUALITY = "quality"
-        const val EXTRA_FORMAT = "format"
+        const val EXTRA_KIND = "kind"
+        const val EXTRA_LABEL = "label"
+        const val EXTRA_VIDEO_URL = "video_url"
+        const val EXTRA_AUDIO_URL = "audio_url"
+        const val EXTRA_VIDEO_EXT = "video_ext"
+        const val EXTRA_AUDIO_EXT = "audio_ext"
+        const val EXTRA_HEIGHT = "height"
         const val EXTRA_SIZE = "size"
         const val EXTRA_OVERWRITE = "overwrite"
         const val EXTRA_JOB_ID = "job_id"
+        const val EXTRA_SOURCE_ID = "source_id"
 
-        fun start(
+        fun startDownload(
             context: Context,
             lookup: VideoLookup,
-            format: VideoFormatOption,
+            option: MediaDownloadOption,
             overwrite: Boolean = false,
             jobId: String = DownloadProgressHub.newJobId(),
         ) {
             val intent = Intent(context, DownloadForegroundService::class.java).apply {
+                putExtra(EXTRA_MODE, MODE_DOWNLOAD)
                 putExtra(EXTRA_URL, lookup.webpageUrl)
-                putExtra(EXTRA_FORMAT_URL, format.url)
+                putExtra(EXTRA_OPTION_ID, option.id)
                 putExtra(EXTRA_TITLE, lookup.title)
                 putExtra(EXTRA_UPLOADER, lookup.uploader)
                 putExtra(EXTRA_VIDEO_ID, lookup.id)
                 putExtra(EXTRA_DURATION, lookup.durationSeconds)
                 putExtra(EXTRA_THUMB, lookup.thumbnailUrl)
-                putExtra(EXTRA_QUALITY, format.resolution)
-                putExtra(EXTRA_FORMAT, format.format)
-                putExtra(EXTRA_SIZE, format.approxSizeBytes ?: -1L)
+                putExtra(EXTRA_KIND, option.kind.name)
+                putExtra(EXTRA_LABEL, option.label)
+                putExtra(EXTRA_VIDEO_URL, option.videoUrl)
+                putExtra(EXTRA_AUDIO_URL, option.audioUrl)
+                putExtra(EXTRA_VIDEO_EXT, option.videoExt)
+                putExtra(EXTRA_AUDIO_EXT, option.audioExt)
+                putExtra(EXTRA_HEIGHT, option.height)
+                putExtra(EXTRA_SIZE, option.approxSizeBytes ?: -1L)
                 putExtra(EXTRA_OVERWRITE, overwrite)
                 putExtra(EXTRA_JOB_ID, jobId)
             }
+            startService(context, intent)
+        }
+
+        fun startConvert(
+            context: Context,
+            source: SavedVideo,
+            jobId: String = DownloadProgressHub.newJobId(),
+        ) {
+            val intent = Intent(context, DownloadForegroundService::class.java).apply {
+                putExtra(EXTRA_MODE, MODE_CONVERT)
+                putExtra(EXTRA_SOURCE_ID, source.id)
+                putExtra(EXTRA_JOB_ID, jobId)
+                putExtra(EXTRA_TITLE, source.title)
+            }
+            startService(context, intent)
+        }
+
+        private fun startService(context: Context, intent: Intent) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {

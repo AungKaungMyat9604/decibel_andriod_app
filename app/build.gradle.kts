@@ -12,8 +12,8 @@ android {
         applicationId = "com.decibel"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 365
+        versionName = "3.6.5"
     }
 
     buildTypes {
@@ -43,11 +43,11 @@ kotlin {
 }
 
 dependencies {
-    implementation(project(":menzies-design-wash-compose"))
-
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.foundation)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
@@ -66,6 +66,9 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.gson)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.reorderable)
+    implementation(libs.ffmpeg.kit.full)
+    implementation(libs.arthenica.smart.exception.java)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

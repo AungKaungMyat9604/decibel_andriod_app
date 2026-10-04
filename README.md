@@ -1,6 +1,6 @@
 # Decibel — offline / online YouTube music player
 
-Android app with Wash Compose UI ([Menzies Design](https://design-menzies.netlify.app/)).
+Android app built with Jetpack Compose and Material 3.
 
 ## Features
 

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Decibel</string>
+    <string name="developer_name">Aung Kaung Myat</string>
     <string name="playback_channel_name">Playback</string>
 </resources>

@@ -2,9 +2,11 @@ package com.decibel.player
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import androidx.core.content.ContextCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -44,7 +46,11 @@ data class PlaybackState(
     val repeatMode: RepeatMode = RepeatMode.Off,
 )
 
-class PlaybackController(context: Context) {
+class PlaybackController(
+    context: Context,
+    private val eqController: EqController,
+    private val waveCapture: PlaybackWaveCapture,
+) {
     private val appContext = context.applicationContext
     private val prefs = PlaybackPrefs(appContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -55,12 +61,37 @@ class PlaybackController(context: Context) {
     private var mediaController: MediaController? = null
     private val connecting = AtomicBoolean(false)
 
+    private val bluetoothAudioMonitor = BluetoothAudioMonitor(appContext) { bluetooth ->
+        waveCapture.setBluetoothOutput(bluetooth)
+    }
+
     /** Original order before shuffle. */
     private var sourceQueue: List<PlayableItem> = emptyList()
     /** Effective play order (shuffled or not). */
     private var playOrder: List<PlayableItem> = emptyList()
 
-    val player: ExoPlayer = ExoPlayer.Builder(appContext).build().also { exo ->
+    init {
+        bluetoothAudioMonitor.start()
+    }
+    @OptIn(androidx.media3.common.util.UnstableApi::class)
+    val player: ExoPlayer = ExoPlayer.Builder(
+        appContext,
+        object : androidx.media3.exoplayer.DefaultRenderersFactory(appContext) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean,
+            ): androidx.media3.exoplayer.audio.AudioSink {
+                // Prefer 16-bit in the processor chain so Tee PCM is consistent across OEMs;
+                // PlaybackWaveCapture still accepts float if the sink upgrades later.
+                return androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
+                    .setEnableFloatOutput(false)
+                    .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                    .setAudioProcessors(arrayOf(waveCapture.audioProcessor))
+                    .build()
+            }
+        },
+    ).build().also { exo ->
         exo.setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
@@ -74,9 +105,15 @@ class PlaybackController(context: Context) {
                 _state.value = _state.value.copy(isPlaying = isPlaying)
                 if (isPlaying) {
                     ensureSessionConnected()
+                    startPlaybackService()
                     startPositionUpdates()
+                    // Notifications / Dolby focus changes often leave Equalizer stale
+                    // without changing session id — force a fresh bind once audio is back.
+                    mainHandler.removeCallbacks(eqRebindRunnable)
+                    mainHandler.postDelayed(eqRebindRunnable, 150L)
                 } else {
                     stopPositionUpdates()
+                    mainHandler.removeCallbacks(eqRebindRunnable)
                 }
             }
 
@@ -85,13 +122,28 @@ class PlaybackController(context: Context) {
                 if (playbackState == Player.STATE_ENDED) {
                     onTrackEnded()
                 }
+                if (playbackState == Player.STATE_READY && player.playWhenReady) {
+                    mainHandler.removeCallbacks(eqRebindRunnable)
+                    mainHandler.postDelayed(eqRebindRunnable, 150L)
+                }
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 refreshTiming()
             }
+
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                eqController.attach(audioSessionId, force = true)
+            }
         })
+        eqController.attach(exo.audioSessionId, force = true)
     }
+
+    private val eqRebindRunnable = Runnable {
+        eqController.attach(player.audioSessionId, force = true)
+    }
+
+    private var lastPersistAtMs = 0L
 
     private val _state = MutableStateFlow(
         PlaybackState(
@@ -109,7 +161,22 @@ class PlaybackController(context: Context) {
         resolveJob?.cancel()
         sourceQueue = queue.ifEmpty { listOf(item) }
         playOrder = buildPlayOrder(sourceQueue, item, _state.value.shuffle)
-        startItem(item, keepQueue = true)
+        startItem(item, keepQueue = true, autoPlay = true, startPositionMs = 0L)
+    }
+
+    /**
+     * Restore last session into the mini player without auto-playing.
+     * Used after cold start when a previous local track was left mid-listen.
+     */
+    fun restorePaused(
+        item: PlayableItem,
+        queue: List<PlayableItem>,
+        positionMs: Long,
+    ) {
+        resolveJob?.cancel()
+        sourceQueue = queue.ifEmpty { listOf(item) }
+        playOrder = buildPlayOrder(sourceQueue, item, _state.value.shuffle)
+        startItem(item, keepQueue = true, autoPlay = false, startPositionMs = positionMs)
     }
 
     fun togglePlayPause() {
@@ -120,6 +187,16 @@ class PlaybackController(context: Context) {
         } else {
             if (player.isPlaying) player.pause() else player.play()
         }
+    }
+
+    fun pause() {
+        ensureSessionConnected()
+        mediaController?.pause() ?: player.pause()
+    }
+
+    fun play() {
+        ensureSessionConnected()
+        mediaController?.play() ?: player.play()
     }
 
     fun seekTo(positionMs: Long) {
@@ -140,6 +217,13 @@ class PlaybackController(context: Context) {
         advance(-1, fromUser = true)
     }
 
+    /** Jump to an item already in the active play order without rebuilding the queue. */
+    fun playQueueItem(item: PlayableItem) {
+        val order = playOrder.ifEmpty { _state.value.queue }
+        if (order.none { it.id == item.id }) return
+        startItem(item, keepQueue = true, autoPlay = true, startPositionMs = 0L)
+    }
+
     /** Stop playback and hide the mini player. */
     fun stopAndClear() {
         resolveJob?.cancel()
@@ -149,6 +233,7 @@ class PlaybackController(context: Context) {
         player.clearMediaItems()
         sourceQueue = emptyList()
         playOrder = emptyList()
+        prefs.clearLastSession()
         _state.value = PlaybackState(
             shuffle = prefs.shuffleEnabled,
             repeatMode = prefs.repeatMode,
@@ -183,11 +268,13 @@ class PlaybackController(context: Context) {
     fun release() {
         resolveJob?.cancel()
         stopPositionUpdates()
+        bluetoothAudioMonitor.stop()
         controllerFuture?.let { future ->
             MediaController.releaseFuture(future)
         }
         mediaController = null
         controllerFuture = null
+        eqController.release()
         player.release()
     }
 
@@ -195,7 +282,7 @@ class PlaybackController(context: Context) {
         when (_state.value.repeatMode) {
             RepeatMode.One -> {
                 val current = _state.value.current ?: return
-                startItem(current, keepQueue = true)
+                startItem(current, keepQueue = true, autoPlay = true, startPositionMs = 0L)
             }
             RepeatMode.All, RepeatMode.Off -> advance(+1, fromUser = false)
         }
@@ -209,29 +296,39 @@ class PlaybackController(context: Context) {
         if (index < 0) return
         val nextIndex = index + delta
         when {
-            nextIndex in order.indices -> startItem(order[nextIndex], keepQueue = true)
+            nextIndex in order.indices ->
+                startItem(order[nextIndex], keepQueue = true, autoPlay = true, startPositionMs = 0L)
             _state.value.repeatMode == RepeatMode.All || (fromUser && _state.value.repeatMode != RepeatMode.Off) -> {
                 val wrap = if (delta > 0) 0 else order.lastIndex
-                startItem(order[wrap], keepQueue = true)
+                startItem(order[wrap], keepQueue = true, autoPlay = true, startPositionMs = 0L)
             }
             fromUser && nextIndex >= order.size && _state.value.repeatMode == RepeatMode.Off -> {
                 // User next at end — wrap if shuffle/all feel expected; stay stopped for Off.
             }
             !fromUser && _state.value.repeatMode == RepeatMode.Off -> {
                 // Natural end — stop.
+                persistSession(force = true)
                 _state.value = _state.value.copy(isPlaying = false)
             }
         }
     }
 
-    private fun startItem(item: PlayableItem, keepQueue: Boolean) {
+    private fun startItem(
+        item: PlayableItem,
+        keepQueue: Boolean,
+        autoPlay: Boolean,
+        startPositionMs: Long,
+    ) {
         resolveJob?.cancel()
         _state.value = _state.value.copy(
             current = item,
             queue = if (keepQueue) playOrder.ifEmpty { listOf(item) } else listOf(item),
             resolving = true,
             error = null,
+            positionMs = startPositionMs.coerceAtLeast(0L),
+            isPlaying = false,
         )
+        persistSession(force = true)
         ensureSessionConnected()
         resolveJob = scope.launch {
             runCatching {
@@ -239,10 +336,17 @@ class PlaybackController(context: Context) {
                 val mediaItem = buildMediaItem(item, uri)
                 player.setMediaItem(mediaItem)
                 player.prepare()
-                player.playWhenReady = true
-                ensureSessionConnected()
+                if (startPositionMs > 0L) {
+                    player.seekTo(startPositionMs)
+                }
+                player.playWhenReady = autoPlay
+                if (autoPlay) {
+                    ensureSessionConnected()
+                    startPlaybackService()
+                }
                 _state.value = _state.value.copy(resolving = false)
                 refreshTiming()
+                persistSession(force = true)
             }.onFailure { err ->
                 _state.value = _state.value.copy(
                     resolving = false,
@@ -318,12 +422,39 @@ class PlaybackController(context: Context) {
         }
     }
 
+    /** Publish the session so lock screen / Bluetooth / notification treat Decibel as music. */
+    private fun startPlaybackService() {
+        runCatching {
+            ContextCompat.startForegroundService(
+                appContext,
+                Intent(appContext, PlaybackService::class.java),
+            )
+        }
+    }
+
     private fun refreshTiming() {
         _state.value = _state.value.copy(
             isPlaying = player.isPlaying,
             positionMs = player.currentPosition.coerceAtLeast(0L),
             durationMs = player.duration.coerceAtLeast(0L)
                 .takeIf { player.duration > 0 } ?: _state.value.durationMs,
+        )
+        persistSession(force = false)
+    }
+
+    private fun persistSession(force: Boolean) {
+        val current = _state.value.current ?: return
+        // Online stream URLs expire — only restore offline library items.
+        if (!current.isLocal) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastPersistAtMs < 2_000L) return
+        lastPersistAtMs = now
+        val queueIds = (sourceQueue.ifEmpty { _state.value.queue }.ifEmpty { listOf(current) })
+            .map { it.id }
+        prefs.saveLastSession(
+            itemId = current.id,
+            queueIds = queueIds,
+            positionMs = _state.value.positionMs,
         )
     }
 
@@ -341,5 +472,6 @@ class PlaybackController(context: Context) {
         positionJob?.cancel()
         positionJob = null
         refreshTiming()
+        persistSession(force = true)
     }
 }

@@ -2,6 +2,7 @@ package com.decibel.data
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import okhttp3.OkHttpClient
@@ -9,6 +10,7 @@ import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
+import kotlin.math.min
 
 /**
  * Caches library preview JPEGs under filesDir/thumbs so Coil works offline.
@@ -82,6 +84,55 @@ class ThumbnailStore(context: Context) {
             } finally {
                 runCatching { retriever.release() }
             }
+        }.getOrNull()
+    }
+
+    /**
+     * Center-crops [sourcePath] to a square JPEG for ID3 album art.
+     * Avoids letterbox borders when players show a 1:1 cover slot.
+     */
+    fun writeSquareCover(
+        sourcePath: String,
+        dest: File,
+        sizePx: Int = 600,
+    ): String? {
+        val src = File(sourcePath.removePrefix("file://"))
+        if (!src.isFile || src.length() <= 0L) return null
+        return runCatching {
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(src.absolutePath, opts)
+            val maxDim = maxOf(opts.outWidth, opts.outHeight).coerceAtLeast(1)
+            val sample = generateSequence(1) { it * 2 }
+                .takeWhile { maxDim / it > sizePx * 2 }
+                .lastOrNull() ?: 1
+            val decoded = BitmapFactory.decodeFile(
+                src.absolutePath,
+                BitmapFactory.Options().apply { inSampleSize = sample },
+            ) ?: return@runCatching null
+
+            val side = min(decoded.width, decoded.height)
+            if (side <= 0) {
+                decoded.recycle()
+                return@runCatching null
+            }
+            val x = (decoded.width - side) / 2
+            val y = (decoded.height - side) / 2
+            val cropped = Bitmap.createBitmap(decoded, x, y, side, side)
+            val square = if (side == sizePx) {
+                cropped
+            } else {
+                Bitmap.createScaledBitmap(cropped, sizePx, sizePx, true).also {
+                    if (it !== cropped) cropped.recycle()
+                }
+            }
+            if (square !== decoded) decoded.recycle()
+
+            dest.parentFile?.mkdirs()
+            FileOutputStream(dest).use { fos ->
+                square.compress(Bitmap.CompressFormat.JPEG, 90, fos)
+            }
+            if (!square.isRecycled) square.recycle()
+            dest.takeIf { it.exists() && it.length() > 0 }?.absolutePath
         }.getOrNull()
     }
 

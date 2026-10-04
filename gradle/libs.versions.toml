@@ -13,7 +13,10 @@ okhttp = "4.12.0"
 newpipe-extractor = "v0.26.5"
 coil = "2.7.0"
 gson = "2.11.0"
+reorderable = "3.1.0"
 coroutines = "1.9.0"
+ffmpeg-kit = "8.1.7"
+smart-exception = "0.2.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "androidx-core" }
@@ -30,6 +33,8 @@ androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graph
 androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation" }
+androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
 media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
 media3-session = { group = "androidx.media3", name = "media3-session", version.ref = "media3" }
@@ -38,6 +43,10 @@ newpipe-extractor = { group = "com.github.TeamNewPipe", name = "NewPipeExtractor
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+reorderable = { module = "sh.calvin.reorderable:reorderable", version.ref = "reorderable" }
+ffmpeg-kit-full = { group = "dev.ffmpegkit-maintained", name = "ffmpeg-kit-full", version.ref = "ffmpeg-kit" }
+# Maintained ffmpeg-kit AAR omits this transitive dep from its POM.
+arthenica-smart-exception-java = { group = "com.arthenica", name = "smart-exception-java", version.ref = "smart-exception" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

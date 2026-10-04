@@ -1,34 +1,33 @@
 package com.decibel.ui.components
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.mariesta.menzies.washui.icons.LucideIcons
-import com.mariesta.menzies.washui.icons.WashIcon
-import com.mariesta.menzies.washui.icons.lucide.Bell
-import com.mariesta.menzies.washui.icons.lucide.List
-import com.mariesta.menzies.washui.icons.lucide.Radio
-import com.mariesta.menzies.washui.icons.lucide.Search
-import com.mariesta.menzies.washui.icons.lucide.Settings
-import com.mariesta.menzies.washui.primitives.WashText
-import com.mariesta.menzies.washui.theme.WashTheme
 
 enum class DockTab {
     Browse,
@@ -38,118 +37,147 @@ enum class DockTab {
     Settings,
 }
 
+private data class DockDestination(
+    val tab: DockTab,
+    val label: String,
+    val icon: ImageVector,
+)
+
+private val DockDestinations = listOf(
+    DockDestination(DockTab.Browse, "Browse", Icons.Outlined.Search),
+    DockDestination(DockTab.Library, "Library", Icons.AutoMirrored.Outlined.LibraryBooks),
+    DockDestination(DockTab.NowPlaying, "Playing", Icons.Outlined.PlayCircle),
+    DockDestination(DockTab.Notifications, "Alerts", Icons.Outlined.Notifications),
+    DockDestination(DockTab.Settings, "Settings", Icons.Outlined.Settings),
+)
+
 @Composable
 fun BottomDock(
     selected: DockTab,
     onSelect: (DockTab) -> Unit,
     notificationBadge: Int = 0,
     enabled: Boolean = true,
+    landscape: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    val colors = WashTheme.colors
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(colors.base_100.copy(alpha = 0.94f))
-            .padding(horizontal = 4.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        DockItem(
-            label = "Browse",
-            selected = selected == DockTab.Browse,
-            enabled = enabled,
-            onClick = { onSelect(DockTab.Browse) },
-            icon = LucideIcons.Search,
-            modifier = Modifier.weight(1f),
-        )
-        DockItem(
-            label = "Library",
-            selected = selected == DockTab.Library,
-            enabled = enabled,
-            onClick = { onSelect(DockTab.Library) },
-            icon = LucideIcons.List,
-            modifier = Modifier.weight(1f),
-        )
-        DockItem(
-            label = "Playing",
-            selected = selected == DockTab.NowPlaying,
-            enabled = enabled,
-            onClick = { onSelect(DockTab.NowPlaying) },
-            icon = LucideIcons.Radio,
-            modifier = Modifier.weight(1f),
-        )
-        DockItem(
-            label = "Alerts",
-            selected = selected == DockTab.Notifications,
-            enabled = enabled,
-            onClick = { onSelect(DockTab.Notifications) },
-            icon = LucideIcons.Bell,
-            badgeCount = notificationBadge,
-            modifier = Modifier.weight(1f),
-        )
-        DockItem(
-            label = "Settings",
-            selected = selected == DockTab.Settings,
-            enabled = enabled,
-            onClick = { onSelect(DockTab.Settings) },
-            icon = LucideIcons.Settings,
-            modifier = Modifier.weight(1f),
-        )
+    if (landscape) {
+        NavigationRail(
+            modifier = modifier.fillMaxHeight(),
+            windowInsets = WindowInsets(0, 0, 0, 0),
+        ) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                DockDestinations.forEach { dest ->
+                    RailDockItem(
+                        label = dest.label,
+                        selected = selected == dest.tab,
+                        enabled = enabled,
+                        onClick = { onSelect(dest.tab) },
+                        icon = dest.icon,
+                        badgeCount = if (dest.tab == DockTab.Notifications) {
+                            notificationBadge
+                        } else {
+                            0
+                        },
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+    } else {
+        NavigationBar(
+            modifier = modifier,
+            windowInsets = WindowInsets(0, 0, 0, 0),
+        ) {
+            DockDestinations.forEach { dest ->
+                BarDockItem(
+                    label = dest.label,
+                    selected = selected == dest.tab,
+                    enabled = enabled,
+                    onClick = { onSelect(dest.tab) },
+                    icon = dest.icon,
+                    badgeCount = if (dest.tab == DockTab.Notifications) {
+                        notificationBadge
+                    } else {
+                        0
+                    },
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun DockItem(
+private fun RowScope.BarDockItem(
     label: String,
     selected: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
     icon: ImageVector,
-    modifier: Modifier = Modifier,
     badgeCount: Int = 0,
 ) {
-    val colors = WashTheme.colors
-    val shape = RoundedCornerShape(colors.radiusField)
-    Column(
-        modifier = modifier
-            .clip(shape)
-            .background(if (selected) colors.wash_a.copy(alpha = 0.7f) else colors.base_200.copy(alpha = 0.55f))
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        Box(contentAlignment = Alignment.TopEnd) {
-            WashIcon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = if (selected) colors.primary else colors.ink_muted,
-                size = 20.dp,
-                modifier = Modifier.padding(horizontal = 6.dp),
+    NavigationBarItem(
+        selected = selected,
+        onClick = onClick,
+        enabled = enabled,
+        icon = { DockIcon(icon = icon, label = label, badgeCount = badgeCount) },
+        label = {
+            Text(
+                text = label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            if (badgeCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .offset(x = 4.dp, y = (-2).dp)
-                        .size(if (badgeCount > 9) 16.dp else 14.dp)
-                        .clip(CircleShape)
-                        .background(colors.error),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    WashText(
-                        text = if (badgeCount > 99) "99+" else badgeCount.toString(),
-                        color = colors.base_100,
-                        fontSize = 8.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
+        },
+    )
+}
+
+@Composable
+private fun ColumnScope.RailDockItem(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    icon: ImageVector,
+    badgeCount: Int = 0,
+) {
+    NavigationRailItem(
+        selected = selected,
+        onClick = onClick,
+        enabled = enabled,
+        icon = { DockIcon(icon = icon, label = label, badgeCount = badgeCount) },
+        label = {
+            Text(
+                text = label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+    )
+}
+
+@Composable
+private fun DockIcon(
+    icon: ImageVector,
+    label: String,
+    badgeCount: Int,
+) {
+    if (badgeCount > 0) {
+        BadgedBox(
+            badge = {
+                Badge {
+                    Text(if (badgeCount > 99) "99+" else badgeCount.toString())
                 }
-            }
+            },
+        ) {
+            Icon(imageVector = icon, contentDescription = label)
         }
-        WashText(
-            text = label,
-            fontSize = 9.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (selected) colors.primary else colors.ink_muted,
-        )
+    } else {
+        Icon(imageVector = icon, contentDescription = label)
     }
 }

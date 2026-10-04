@@ -1,5 +1,7 @@
 package com.decibel.ui
 
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -8,50 +10,64 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.decibel.data.DownloadJob
 import com.decibel.data.DownloadJobState
-import com.mariesta.menzies.washui.primitives.WashToastState
-import com.mariesta.menzies.washui.primitives.WashToastTone
 
 /**
- * Pushes a Wash toast for each meaningful download notification transition
- * (queued, started, saved, failed). Skips percent-only progress updates.
+ * Snackbars for download state transitions only (queued / started / saved / failed).
+ * Percent-only progress updates must not re-trigger alerts.
  */
 @Composable
 fun DownloadJobToasts(
     jobs: List<DownloadJob>,
-    toast: WashToastState,
+    snackbarHostState: SnackbarHostState,
 ) {
     var previous by remember { mutableStateOf<Map<String, DownloadJobState>>(emptyMap()) }
 
-    LaunchedEffect(jobs) {
+    // Key on jobId→state only so byte/percent churn does not restart this effect.
+    val stateSignature = remember(jobs) {
+        jobs.joinToString(separator = "|") { "${it.jobId}:${it.state.name}" }
+    }
+
+    LaunchedEffect(stateSignature) {
         val next = jobs.associate { it.jobId to it.state }
+        val messages = mutableListOf<Pair<String, SnackbarDuration>>()
+
         for (job in jobs) {
             val old = previous[job.jobId]
+            if (old == job.state) continue
+
             val title = job.title.toastTitle()
-            when {
-                old == null && job.state == DownloadJobState.Queued -> {
-                    toast.push("Queued · $title", WashToastTone.Info)
-                }
-                old == null && job.state == DownloadJobState.Running -> {
-                    toast.push("Downloading · $title", WashToastTone.Info)
-                }
+            val message = when {
+                old == null && job.state == DownloadJobState.Queued ->
+                    "Queued · $title"
+                old == null && job.state == DownloadJobState.Running ->
+                    "Downloading · $title"
                 old != null &&
                     old != DownloadJobState.Running &&
-                    job.state == DownloadJobState.Running -> {
-                    toast.push("Downloading · $title", WashToastTone.Info)
+                    job.state == DownloadJobState.Running ->
+                    "Downloading · $title"
+                job.state == DownloadJobState.Success ->
+                    "Saved · $title"
+                job.state == DownloadJobState.Failed ->
+                    job.message?.takeIf { it.isNotBlank() }?.toastTitle()
+                        ?: "Failed · $title"
+                else -> null
+            }
+            if (message != null) {
+                val duration = if (job.state == DownloadJobState.Failed) {
+                    SnackbarDuration.Long
+                } else {
+                    SnackbarDuration.Short
                 }
-                old != DownloadJobState.Success && job.state == DownloadJobState.Success -> {
-                    toast.push("Saved · $title", WashToastTone.Success)
-                }
-                old != DownloadJobState.Failed && job.state == DownloadJobState.Failed -> {
-                    val detail = job.message?.takeIf { it.isNotBlank() }?.toastTitle()
-                    toast.push(
-                        detail ?: "Failed · $title",
-                        WashToastTone.Error,
-                    )
-                }
+                messages += message to duration
             }
         }
+
+        // Commit before suspending showSnackbar so a cancel/restart cannot re-fire.
         previous = next
+
+        for ((message, duration) in messages) {
+            snackbarHostState.showSnackbar(message = message, duration = duration)
+        }
     }
 }
 

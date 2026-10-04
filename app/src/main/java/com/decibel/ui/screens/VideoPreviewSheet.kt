@@ -12,6 +12,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -21,13 +29,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.mariesta.menzies.washui.primitives.WashButton
-import com.mariesta.menzies.washui.primitives.WashButtonVariant
-import com.mariesta.menzies.washui.primitives.WashPanel
-import com.mariesta.menzies.washui.primitives.WashText
-import com.mariesta.menzies.washui.theme.WashTheme
 import com.decibel.ui.PreviewUiState
-import com.decibel.youtube.VideoFormatOption
+import com.decibel.youtube.DownloadKind
+import com.decibel.youtube.MediaDownloadOption
 import com.decibel.youtube.formatBytes
 import com.decibel.youtube.formatDuration
 
@@ -36,17 +40,26 @@ fun VideoPreviewSheet(
     state: PreviewUiState,
     activeDownloads: Int,
     onClose: () -> Unit,
-    onSelectFormat: (VideoFormatOption) -> Unit,
+    onSelectOption: (MediaDownloadOption) -> Unit,
     onPlayOnline: () -> Unit,
     onDownload: () -> Unit,
 ) {
-    val colors = WashTheme.colors
+    val colors = MaterialTheme.colorScheme
     val video = state.video ?: return
+    val options = state.lookup?.downloadOptions.orEmpty()
+    val hq = options.filter { it.kind == DownloadKind.VIDEO_HQ }
+    val mp3 = options.filter { it.kind == DownloadKind.AUDIO_MP3 }
+    val quick = options.filter { it.kind == DownloadKind.PROGRESSIVE }
 
-    WashPanel(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = colors.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .padding(16.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -55,8 +68,13 @@ fun VideoPreviewSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                WashText(text = "Preview", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                WashButton(onClick = onClose, text = "Close", variant = WashButtonVariant.Ghost)
+                Text(
+                    text = "Preview",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
+                    color = colors.onSurface,
+                )
+                TextButton(onClick = onClose) { Text("Close") }
             }
 
             if (!video.thumbnailUrl.isNullOrBlank()) {
@@ -67,12 +85,17 @@ fun VideoPreviewSheet(
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(16f / 9f)
-                        .clip(RoundedCornerShape(colors.radiusBox)),
+                        .clip(RoundedCornerShape(12.dp)),
                 )
             }
 
-            WashText(text = video.title, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-            WashText(
+            Text(
+                text = video.title,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 18.sp,
+                color = colors.onSurface,
+            )
+            Text(
                 text = buildString {
                     append(video.uploader)
                     if (video.durationSeconds > 0) {
@@ -80,61 +103,95 @@ fun VideoPreviewSheet(
                         append(video.durationSeconds.formatDuration())
                     }
                 },
-                color = colors.ink_muted,
+                color = colors.onSurfaceVariant,
                 fontSize = 13.sp,
             )
 
             if (state.loading) {
-                WashText(text = "Loading streams…", color = colors.ink_muted)
+                Text(text = "Loading streams…", color = colors.onSurfaceVariant)
             }
 
             if (!state.error.isNullOrBlank()) {
-                WashText(text = state.error, color = colors.error, fontSize = 13.sp)
+                Text(text = state.error, color = colors.error, fontSize = 13.sp)
             }
 
-            WashButton(
+            Button(
                 onClick = onPlayOnline,
-                text = "Play online",
-                variant = WashButtonVariant.Primary,
-                loading = state.playingOnline,
-                enabled = !state.loading && state.error.isNullOrBlank(),
+                enabled = !state.loading && state.error.isNullOrBlank() && !state.playingOnline,
                 modifier = Modifier.fillMaxWidth(),
-            )
-
-            val formats = state.lookup?.videoFormats.orEmpty()
-            if (formats.isNotEmpty()) {
-                WashText(
-                    text = "Quality · ${formats.size} progressive option(s)",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                )
-                WashText(
-                    text = "Pick a resolution before downloading. Highest is selected by default.",
-                    color = colors.ink_muted,
-                    fontSize = 12.sp,
-                )
-                formats.forEach { format ->
-                    FormatRow(
-                        format = format,
-                        selected = state.selectedFormat == format,
-                        onClick = { onSelectFormat(format) },
+            ) {
+                if (state.playingOnline) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.padding(end = 8.dp),
+                        strokeWidth = 2.dp,
+                        color = colors.onPrimary,
                     )
                 }
-                WashButton(
-                    onClick = onDownload,
-                    text = if (activeDownloads > 0) {
-                        "Download for offline (+$activeDownloads active)"
-                    } else {
-                        "Download for offline"
-                    },
-                    variant = WashButtonVariant.Accent,
-                    enabled = state.selectedFormat != null && !state.loading,
-                    modifier = Modifier.fillMaxWidth(),
+                Text("Play online")
+            }
+
+            if (hq.isNotEmpty()) {
+                SectionTitle("High quality video")
+                Text(
+                    text = "Best DASH streams merged to MP4.",
+                    color = colors.onSurfaceVariant,
+                    fontSize = 12.sp,
                 )
+                hq.forEach { option ->
+                    OptionRow(
+                        option = option,
+                        selected = state.selectedOption == option,
+                        onClick = { onSelectOption(option) },
+                    )
+                }
+            }
+
+            if (mp3.isNotEmpty()) {
+                SectionTitle("Music")
+                mp3.forEach { option ->
+                    OptionRow(
+                        option = option,
+                        selected = state.selectedOption == option,
+                        onClick = { onSelectOption(option) },
+                    )
+                }
+            }
+
+            if (quick.isNotEmpty()) {
+                SectionTitle("Quick video")
+                Text(
+                    text = "Progressive single-file download (often 360p).",
+                    color = colors.onSurfaceVariant,
+                    fontSize = 12.sp,
+                )
+                quick.forEach { option ->
+                    OptionRow(
+                        option = option,
+                        selected = state.selectedOption == option,
+                        onClick = { onSelectOption(option) },
+                    )
+                }
+            }
+
+            if (options.isNotEmpty()) {
+                FilledTonalButton(
+                    onClick = onDownload,
+                    enabled = state.selectedOption != null && !state.loading,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    val label = state.selectedOption?.label ?: "Download"
+                    Text(
+                        if (activeDownloads > 0) {
+                            "Download $label (+$activeDownloads active)"
+                        } else {
+                            "Download $label"
+                        },
+                    )
+                }
             } else if (!state.loading && state.lookup != null) {
-                WashText(
-                    text = "Online play available. No progressive file download for this video.",
-                    color = colors.ink_muted,
+                Text(
+                    text = "Online play available. No download options for this video.",
+                    color = colors.onSurfaceVariant,
                     fontSize = 12.sp,
                 )
             }
@@ -143,39 +200,54 @@ fun VideoPreviewSheet(
 }
 
 @Composable
-private fun FormatRow(
-    format: VideoFormatOption,
+private fun SectionTitle(text: String) {
+    Text(
+        text = text,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 14.sp,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+}
+
+@Composable
+private fun OptionRow(
+    option: MediaDownloadOption,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    val colors = WashTheme.colors
-    val shape = RoundedCornerShape(colors.radiusField)
+    val colors = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(8.dp)
+    val subtitle = when (option.kind) {
+        DownloadKind.VIDEO_HQ -> "Merged MP4 · excellent quality"
+        DownloadKind.AUDIO_MP3 -> "Encoded from best audio"
+        DownloadKind.PROGRESSIVE -> "Progressive file"
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(if (selected) colors.wash_a.copy(alpha = 0.65f) else colors.base_200)
-            .border(2.dp, if (selected) colors.primary else colors.ink_border, shape)
+            .background(if (selected) colors.primaryContainer else colors.surfaceVariant)
+            .border(2.dp, if (selected) colors.primary else colors.outline, shape)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column {
-            WashText(
-                text = format.resolution,
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = option.label,
                 fontWeight = FontWeight.SemiBold,
-                color = if (selected) colors.primary else colors.base_content,
+                color = if (selected) colors.primary else colors.onSurface,
             )
-            WashText(
-                text = "${format.format.uppercase()} progressive",
-                color = colors.ink_muted,
+            Text(
+                text = subtitle,
+                color = colors.onSurfaceVariant,
                 fontSize = 12.sp,
             )
         }
-        WashText(
-            text = format.approxSizeBytes.formatBytes(),
-            color = colors.ink_muted,
+        Text(
+            text = option.approxSizeBytes.formatBytes(),
+            color = colors.onSurfaceVariant,
             fontSize = 13.sp,
         )
     }
